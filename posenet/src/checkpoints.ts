@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licnses/LICENSE-2.0
+ * https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,31 +15,34 @@
  * =============================================================================
  */
 
-import {ConvolutionDefinition, mobileNetArchitectures} from './mobilenet'
+const MOBILENET_BASE_URL =
+    'https://storage.googleapis.com/tfjs-models/savedmodel/posenet/mobilenet/';
+const RESNET50_BASE_URL =
+    'https://storage.googleapis.com/tfjs-models/savedmodel/posenet/resnet50/';
 
-const GOOGLE_CLOUD_STORAGE_DIR =
-    'https://storage.googleapis.com/tfjs-models/weights/posenet/';
+// The PoseNet 2.0 ResNet50 models use the latest TensorFlow.js 1.0 model
+// format.
+export function resNet50Checkpoint(stride: number, quantBytes: number): string {
+  const graphJson = `model-stride${stride}.json`;
+  // quantBytes=4 corresponding to the non-quantized full-precision checkpoints.
+  if (quantBytes == 4) {
+    return RESNET50_BASE_URL + `float/` + graphJson;
+  } else {
+    return RESNET50_BASE_URL + `quant${quantBytes}/` + graphJson;
+  }
+};
 
-export type Checkpoint = {
-  url: string,
-  architecture: ConvolutionDefinition[]
-}
-
-export const checkpoints: {[multiplier: number]: Checkpoint} = {
-  1.01: {
-    url: GOOGLE_CLOUD_STORAGE_DIR + 'mobilenet_v1_101/',
-    architecture: mobileNetArchitectures[100]
-  },
-  1.0: {
-    url: GOOGLE_CLOUD_STORAGE_DIR + 'mobilenet_v1_100/',
-    architecture: mobileNetArchitectures[100]
-  },
-  0.75: {
-    url: GOOGLE_CLOUD_STORAGE_DIR + 'mobilenet_v1_075/',
-    architecture: mobileNetArchitectures[75]
-  },
-  0.5: {
-    url: GOOGLE_CLOUD_STORAGE_DIR + 'mobilenet_v1_050/',
-    architecture: mobileNetArchitectures[50]
+// The PoseNet 2.0 MobileNetV1 models use the latest TensorFlow.js 1.0 model
+// format.
+export function mobileNetCheckpoint(
+    stride: number, multiplier: number, quantBytes: number): string {
+  const toStr: {[key: number]: string} = {1.0: '100', 0.75: '075', 0.50: '050'};
+  const graphJson = `model-stride${stride}.json`;
+  // quantBytes=4 corresponding to the non-quantized full-precision checkpoints.
+  if (quantBytes == 4) {
+    return MOBILENET_BASE_URL + `float/${toStr[multiplier]}/` + graphJson;
+  } else {
+    return MOBILENET_BASE_URL + `quant${quantBytes}/${toStr[multiplier]}/` +
+        graphJson;
   }
 }
