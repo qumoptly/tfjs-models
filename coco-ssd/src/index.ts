@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2018 Google LLC. All Rights Reserved.
+ * Copyright 2019 Google LLC. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -33,14 +33,30 @@ export interface DetectedObject {
   score: number;
 }
 
-export async function load(
-    base: ObjectDetectionBaseModel = 'lite_mobilenet_v2') {
+/**
+ * Coco-ssd model loading is configurable using the following config dictionary.
+ *
+ * `base`: ObjectDetectionBaseModel. It determines wich PoseNet architecture
+ * to load. The supported architectures are: 'mobilenet_v1', 'mobilenet_v2' and
+ * 'lite_mobilenet_v2'. It is default to 'lite_mobilenet_v2'.
+ *
+ * `modelUrl`: An optional string that specifies custom url of the model. This
+ * is useful for area/countries that don't have access to the model hosted on
+ * GCP.
+ */
+export interface ModelConfig {
+  base?: ObjectDetectionBaseModel;
+  modelUrl?: string;
+}
+
+export async function load(config: ModelConfig = {}) {
   if (tf == null) {
     throw new Error(
         `Cannot find TensorFlow.js. If you are using a <script> tag, please ` +
         `also include @tensorflow/tfjs on the page before using this model.`);
   }
-
+  const base = config.base || 'lite_mobilenet_v2';
+  const modelUrl = config.modelUrl;
   if (['mobilenet_v1', 'mobilenet_v2', 'lite_mobilenet_v2'].indexOf(base) ===
       -1) {
     throw new Error(
@@ -49,7 +65,7 @@ export async function load(
         ` 'mobilenet_v2' and 'lite_mobilenet_v2'.`);
   }
 
-  const objectDetection = new ObjectDetection(base);
+  const objectDetection = new ObjectDetection(base, modelUrl);
   await objectDetection.load();
   return objectDetection;
 }
@@ -58,8 +74,9 @@ export class ObjectDetection {
   private modelPath: string;
   private model: tfconv.GraphModel;
 
-  constructor(base: ObjectDetectionBaseModel) {
-    this.modelPath = `${BASE_PATH}${this.getPrefix(base)}/model.json`;
+  constructor(base: ObjectDetectionBaseModel, modelUrl?: string) {
+    this.modelPath =
+        modelUrl || `${BASE_PATH}${this.getPrefix(base)}/model.json`;
   }
 
   private getPrefix(base: ObjectDetectionBaseModel) {
@@ -69,11 +86,12 @@ export class ObjectDetection {
   async load() {
     this.model = await tfconv.loadGraphModel(this.modelPath);
 
+    const zeroTensor = tf.zeros([1, 300, 300, 3], 'int32');
     // Warmup the model.
-    const result = await this.model.executeAsync(tf.zeros([1, 300, 300, 3])) as
-        tf.Tensor[];
-    result.map(async (t) => await t.data());
-    result.map(async (t) => t.dispose());
+    const result = await this.model.executeAsync(zeroTensor) as tf.Tensor[];
+    await Promise.all(result.map(t => t.data()));
+    result.map(t => t.dispose());
+    zeroTensor.dispose();
   }
 
   /**
@@ -84,11 +102,14 @@ export class ObjectDetection {
    * @param maxNumBoxes The maximum number of bounding boxes of detected
    * objects. There can be multiple objects of the same class, but at different
    * locations. Defaults to 20.
+   * @param minScore The minimum score of the returned bounding boxes
+   * of detected objects. Value between 0 and 1. Defaults to 0.5.
    */
   private async infer(
       img: tf.Tensor3D|ImageData|HTMLImageElement|HTMLCanvasElement|
       HTMLVideoElement,
-      maxNumBoxes: number): Promise<DetectedObject[]> {
+      maxNumBoxes: number, 
+      minScore: number): Promise<DetectedObject[]> {
     const batched = tf.tidy(() => {
       if (!(img instanceof tf.Tensor)) {
         img = tf.browser.fromPixels(img);
@@ -123,7 +144,7 @@ export class ObjectDetection {
       const boxes2 =
           tf.tensor2d(boxes, [result[1].shape[1], result[1].shape[3]]);
       return tf.image.nonMaxSuppression(
-          boxes2, maxScores, maxNumBoxes, 0.5, 0.5);
+          boxes2, maxScores, maxNumBoxes, minScore, minScore);
     });
 
     const indexes = indexTensor.dataSync() as Float32Array;
@@ -192,13 +213,15 @@ export class ObjectDetection {
    * @param maxNumBoxes The maximum number of bounding boxes of detected
    * objects. There can be multiple objects of the same class, but at different
    * locations. Defaults to 20.
-   *
+   * @param minScore The minimum score of the returned bounding boxes
+   * of detected objects. Value between 0 and 1. Defaults to 0.5.
    */
   async detect(
       img: tf.Tensor3D|ImageData|HTMLImageElement|HTMLCanvasElement|
       HTMLVideoElement,
-      maxNumBoxes = 20): Promise<DetectedObject[]> {
-    return this.infer(img, maxNumBoxes);
+      maxNumBoxes = 20,
+      minScore = 0.5): Promise<DetectedObject[]> {
+    return this.infer(img, maxNumBoxes, minScore);
   }
 
   /**
@@ -206,7 +229,7 @@ export class ObjectDetection {
    * are done with the model.
    */
   dispose() {
-    if (this.model) {
+    if (this.model != null) {
       this.model.dispose();
     }
   }
